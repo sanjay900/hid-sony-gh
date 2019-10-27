@@ -381,6 +381,13 @@ static const unsigned int sixaxis_absmap[] = {
 	[0x35] = ABS_RY, /* right stick Y */
 };
 
+static const unsigned int guitar_absmap[] = {
+	[0x30] = ABS_X,
+	[0x31] = ABS_Y,
+	[0x32] = ABS_RX, /* right stick X */
+	[0x35] = ABS_RY, /* right stick Y */
+};
+
 static const unsigned int sixaxis_keymap[] = {
 	[0x01] = BTN_SELECT, /* Select */
 	[0x02] = BTN_THUMBL, /* L3 */
@@ -2970,9 +2977,9 @@ static int sony_resume(struct hid_device *hdev)
 
 static const struct hid_device_id sony_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ACTIVISION, USB_DEVICE_ID_ACTIVISION_GUITAR),
-		.driver_data = GH_GUITAR },
+		.driver_data = SIXAXIS_CONTROLLER_USB },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY2, USB_DEVICE_ID_SONY_GUITAR),
-		.driver_data = GH_GUITAR },
+		.driver_data = SIXAXIS_CONTROLLER_USB },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
 		.driver_data = SIXAXIS_CONTROLLER_USB },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
