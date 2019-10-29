@@ -380,13 +380,30 @@ static const unsigned int sixaxis_absmap[] = {
 	[0x32] = ABS_RX, /* right stick X */
 	[0x35] = ABS_RY, /* right stick Y */
 };
-
 static const unsigned int guitar_absmap[] = {
-	[0x30] = ABS_X,
-	[0x31] = ABS_Y,
-	[0x32] = ABS_RX, /* right stick X */
-	[0x35] = ABS_RY, /* right stick Y */
+	[0x32] = ABS_Z, /* Whammy */
+	[0x30] = ABS_RY, /* Unknown */
+	[0x35] = ABS_RZ, /* Tap Bar */
 };
+
+
+static const unsigned int guitar_keymap[] = {
+	[0x01] = BTN_SOUTH, /* Select */
+	[0x02] = BTN_EAST, /* L3 */
+	[0x03] = BTN_C, /* R3 */
+	[0x04] = BTN_NORTH, /* Start */
+	[0x05] = BTN_WEST, /* Up */
+	[0x06] = BTN_Z, /* Right */
+	[0x07] = BTN_TL, /* Down */
+	[0x08] = BTN_TR, /* Left */
+	[0x09] = BTN_TL2, /* L2 */
+	[0x0a] = BTN_TR2, /* R2 */
+	[0x0b] = BTN_SELECT, /* L1 */
+	[0x0c] = BTN_START, /* R1 */
+	[0x0d] = BTN_MODE, /* Triangle */
+};
+
+//All of this is wrong for the guitar, we need to make guitar specific keymaps and absmaps.
 
 static const unsigned int sixaxis_keymap[] = {
 	[0x01] = BTN_SELECT, /* Select */
@@ -513,6 +530,7 @@ struct motion_output_report_02 {
 #define DS4_ACC_RES_PER_G      8192
 
 #define SIXAXIS_INPUT_REPORT_ACC_X_OFFSET 41
+#define GUITAR_INPUT_REPORT_ACC_X_OFFSET 19
 #define SIXAXIS_ACC_RES_PER_G 113
 
 static DEFINE_SPINLOCK(sony_dev_list_lock);
@@ -765,6 +783,37 @@ static int navigation_mapping(struct hid_device *hdev, struct hid_input *hi,
 	return -1;
 }
 
+static int guitar_mapping(struct hid_device *hdev, struct hid_input *hi,
+			  struct hid_field *field, struct hid_usage *usage,
+			  unsigned long **bit, int *max)
+{	
+	if ((usage->hid & HID_USAGE_PAGE) == HID_UP_BUTTON) {
+		unsigned int key = usage->hid & HID_USAGE;
+
+		if (key >= ARRAY_SIZE(guitar_keymap))
+			return -1;
+
+		key = guitar_keymap[key];
+		hid_map_usage_clear(hi, usage, bit, max, EV_KEY, key);
+		return 1;
+	} else if ((usage->hid & HID_USAGE_PAGE) == HID_UP_GENDESK) {
+		unsigned int abs = usage->hid & HID_USAGE;
+
+		/* Let the HID parser deal with the HAT. */
+		if (usage->hid == HID_GD_HATSWITCH)
+			return 0;
+
+		if (abs >= ARRAY_SIZE(guitar_absmap))
+			return -1;
+		
+		abs = guitar_absmap[abs];
+
+		hid_map_usage_clear(hi, usage, bit, max, EV_ABS, abs);
+		return 1;
+	} 
+	return -1;
+}
+
 static int sixaxis_mapping(struct hid_device *hdev, struct hid_input *hi,
 			  struct hid_field *field, struct hid_usage *usage,
 			  unsigned long **bit, int *max)
@@ -803,7 +852,7 @@ static int sixaxis_mapping(struct hid_device *hdev, struct hid_input *hi,
 
 		if (abs >= ARRAY_SIZE(sixaxis_absmap))
 			return -1;
-
+		
 		abs = sixaxis_absmap[abs];
 
 		hid_map_usage_clear(hi, usage, bit, max, EV_ABS, abs);
@@ -882,20 +931,8 @@ static void guitar_parse_report(struct sony_sc *sc, u8 *rd, int size)
 	struct hid_input *hidinput = list_entry(sc->hdev->inputs.next,
 						struct hid_input, list);
 	struct input_dev *input_dev = hidinput->input;
-	int offset;
-	int val;
-
-	offset = SIXAXIS_INPUT_REPORT_ACC_X_OFFSET;
-	val = ((rd[offset+1] << 8) | rd[offset]) - 511;
-	hid_info(sc->hdev, "val %d\n",val);
+	int val = 128-(rd[GUITAR_INPUT_REPORT_ACC_X_OFFSET]-200);
 	input_report_abs(input_dev, ABS_RY, val);
-
-	// /* Y and Z are swapped and inversed */
-	// val = 511 - ((rd[offset+5] << 8) | rd[offset+4]);
-	// input_report_abs(sc->sensor_dev, ABS_Y, val);
-
-	// val = 511 - ((rd[offset+3] << 8) | rd[offset+2]);
-	// input_report_abs(sc->sensor_dev, ABS_Z, val);
 
 	input_sync(input_dev);
 }
@@ -1236,8 +1273,7 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 		swap(rd[47], rd[48]);
 
 		sixaxis_parse_report(sc, rd, size);
-	} else if ((sc->quirks & GH_GUITAR)) {
-		hid_info(sc->hdev, "guitar %d %d %d\n", rd[0], size);
+	} else if ((sc->quirks & GH_GUITAR) && size == 27) {
 		guitar_parse_report(sc, rd, size);
 	} else if ((sc->quirks & MOTION_CONTROLLER_BT) && rd[0] == 0x01 && size == 49) {
 		sixaxis_parse_report(sc, rd, size);
@@ -1369,8 +1405,11 @@ static int sony_mapping(struct hid_device *hdev, struct hid_input *hi,
 	if (sc->quirks & NAVIGATION_CONTROLLER)
 		return navigation_mapping(hdev, hi, field, usage, bit, max);
 
-	if (sc->quirks & SIXAXIS_CONTROLLER || sc->quirks & GH_GUITAR)
+	if (sc->quirks & SIXAXIS_CONTROLLER)
 		return sixaxis_mapping(hdev, hi, field, usage, bit, max);
+
+	if (sc->quirks & GH_GUITAR)
+		return guitar_mapping(hdev, hi, field, usage, bit, max);
 
 	if (sc->quirks & DUALSHOCK4_CONTROLLER)
 		return ds4_mapping(hdev, hi, field, usage, bit, max);
@@ -2977,9 +3016,9 @@ static int sony_resume(struct hid_device *hdev)
 
 static const struct hid_device_id sony_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ACTIVISION, USB_DEVICE_ID_ACTIVISION_GUITAR),
-		.driver_data = SIXAXIS_CONTROLLER_USB },
+		.driver_data = GH_GUITAR },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY2, USB_DEVICE_ID_SONY_GUITAR),
-		.driver_data = SIXAXIS_CONTROLLER_USB },
+		.driver_data = GH_GUITAR },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
 		.driver_data = SIXAXIS_CONTROLLER_USB },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
