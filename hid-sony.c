@@ -56,7 +56,7 @@
 #define NSG_MR5U_REMOTE_BT        BIT(14)
 #define NSG_MR7U_REMOTE_BT        BIT(15)
 #define SHANWAN_GAMEPAD           BIT(16)
-#define GH_GUITAR	              BIT(17)
+#define GH_GUITAR_CONTROLLER      BIT(17)
 
 #define SIXAXIS_CONTROLLER (SIXAXIS_CONTROLLER_USB | SIXAXIS_CONTROLLER_BT)
 #define MOTION_CONTROLLER (MOTION_CONTROLLER_USB | MOTION_CONTROLLER_BT)
@@ -380,30 +380,6 @@ static const unsigned int sixaxis_absmap[] = {
 	[0x32] = ABS_RX, /* right stick X */
 	[0x35] = ABS_RY, /* right stick Y */
 };
-static const unsigned int guitar_absmap[] = {
-	[0x32] = ABS_Z, /* Whammy */
-	[0x30] = ABS_RY, /* Unknown */
-	[0x35] = ABS_RZ, /* Tap Bar */
-};
-
-
-static const unsigned int guitar_keymap[] = {
-	[0x01] = BTN_SOUTH, /* Select */
-	[0x02] = BTN_EAST, /* L3 */
-	[0x03] = BTN_C, /* R3 */
-	[0x04] = BTN_NORTH, /* Start */
-	[0x05] = BTN_WEST, /* Up */
-	[0x06] = BTN_Z, /* Right */
-	[0x07] = BTN_TL, /* Down */
-	[0x08] = BTN_TR, /* Left */
-	[0x09] = BTN_TL2, /* L2 */
-	[0x0a] = BTN_TR2, /* R2 */
-	[0x0b] = BTN_SELECT, /* L1 */
-	[0x0c] = BTN_START, /* R1 */
-	[0x0d] = BTN_MODE, /* Triangle */
-};
-
-//All of this is wrong for the guitar, we need to make guitar specific keymaps and absmaps.
 
 static const unsigned int sixaxis_keymap[] = {
 	[0x01] = BTN_SELECT, /* Select */
@@ -530,8 +506,9 @@ struct motion_output_report_02 {
 #define DS4_ACC_RES_PER_G      8192
 
 #define SIXAXIS_INPUT_REPORT_ACC_X_OFFSET 41
-#define GUITAR_INPUT_REPORT_ACC_X_OFFSET 19
 #define SIXAXIS_ACC_RES_PER_G 113
+
+#define GUITAR_TILT_USAGE 44
 
 static DEFINE_SPINLOCK(sony_dev_list_lock);
 static LIST_HEAD(sony_device_list);
@@ -786,32 +763,15 @@ static int navigation_mapping(struct hid_device *hdev, struct hid_input *hi,
 static int guitar_mapping(struct hid_device *hdev, struct hid_input *hi,
 			  struct hid_field *field, struct hid_usage *usage,
 			  unsigned long **bit, int *max)
-{	
-	if ((usage->hid & HID_USAGE_PAGE) == HID_UP_BUTTON) {
-		unsigned int key = usage->hid & HID_USAGE;
-
-		if (key >= ARRAY_SIZE(guitar_keymap))
-			return -1;
-
-		key = guitar_keymap[key];
-		hid_map_usage_clear(hi, usage, bit, max, EV_KEY, key);
-		return 1;
-	} else if ((usage->hid & HID_USAGE_PAGE) == HID_UP_GENDESK) {
+{
+	if ((usage->hid & HID_USAGE_PAGE) == HID_UP_MSVENDOR) {
 		unsigned int abs = usage->hid & HID_USAGE;
-
-		/* Let the HID parser deal with the HAT. */
-		if (usage->hid == HID_GD_HATSWITCH)
-			return 0;
-
-		if (abs >= ARRAY_SIZE(guitar_absmap))
-			return -1;
-		
-		abs = guitar_absmap[abs];
-
-		hid_map_usage_clear(hi, usage, bit, max, EV_ABS, abs);
-		return 1;
-	} 
-	return -1;
+		if (abs == GUITAR_TILT_USAGE) {
+			hid_map_usage_clear(hi, usage, bit, max, EV_ABS, ABS_RY);
+			return 1;
+		}
+	}
+	return 0;
 }
 
 static int sixaxis_mapping(struct hid_device *hdev, struct hid_input *hi,
@@ -852,7 +812,7 @@ static int sixaxis_mapping(struct hid_device *hdev, struct hid_input *hi,
 
 		if (abs >= ARRAY_SIZE(sixaxis_absmap))
 			return -1;
-		
+
 		abs = sixaxis_absmap[abs];
 
 		hid_map_usage_clear(hi, usage, bit, max, EV_ABS, abs);
@@ -924,17 +884,6 @@ static u8 *sony_report_fixup(struct hid_device *hdev, u8 *rdesc,
 		return ps3remote_fixup(hdev, rdesc, rsize);
 
 	return rdesc;
-}
-
-static void guitar_parse_report(struct sony_sc *sc, u8 *rd, int size)
-{
-	struct hid_input *hidinput = list_entry(sc->hdev->inputs.next,
-						struct hid_input, list);
-	struct input_dev *input_dev = hidinput->input;
-	int val = 128-(rd[GUITAR_INPUT_REPORT_ACC_X_OFFSET]-200);
-	input_report_abs(input_dev, ABS_RY, val);
-
-	input_sync(input_dev);
 }
 
 static void sixaxis_parse_report(struct sony_sc *sc, u8 *rd, int size)
@@ -1251,6 +1200,7 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 		u8 *rd, int size)
 {
 	struct sony_sc *sc = hid_get_drvdata(hdev);
+
 	/*
 	 * Sixaxis HID report has acclerometers/gyro with MSByte first, this
 	 * has to be BYTE_SWAPPED before passing up to joystick interface
@@ -1273,8 +1223,6 @@ static int sony_raw_event(struct hid_device *hdev, struct hid_report *report,
 		swap(rd[47], rd[48]);
 
 		sixaxis_parse_report(sc, rd, size);
-	} else if ((sc->quirks & GH_GUITAR) && size == 27) {
-		guitar_parse_report(sc, rd, size);
 	} else if ((sc->quirks & MOTION_CONTROLLER_BT) && rd[0] == 0x01 && size == 49) {
 		sixaxis_parse_report(sc, rd, size);
 	} else if ((sc->quirks & NAVIGATION_CONTROLLER) && rd[0] == 0x01 &&
@@ -1408,7 +1356,7 @@ static int sony_mapping(struct hid_device *hdev, struct hid_input *hi,
 	if (sc->quirks & SIXAXIS_CONTROLLER)
 		return sixaxis_mapping(hdev, hi, field, usage, bit, max);
 
-	if (sc->quirks & GH_GUITAR)
+	if (sc->quirks & GH_GUITAR_CONTROLLER)
 		return guitar_mapping(hdev, hi, field, usage, bit, max);
 
 	if (sc->quirks & DUALSHOCK4_CONTROLLER)
@@ -2325,9 +2273,15 @@ static int sony_play_effect(struct input_dev *dev, void *data,
 
 static int sony_init_ff(struct sony_sc *sc)
 {
-	struct hid_input *hidinput = list_entry(sc->hdev->inputs.next,
-						struct hid_input, list);
-	struct input_dev *input_dev = hidinput->input;
+	struct hid_input *hidinput;
+	struct input_dev *input_dev;
+
+	if (list_empty(&sc->hdev->inputs)) {
+		hid_err(sc->hdev, "no inputs found\n");
+		return -ENODEV;
+	}
+	hidinput = list_entry(sc->hdev->inputs.next, struct hid_input, list);
+	input_dev = hidinput->input;
 
 	input_set_capability(input_dev, EV_FF, FF_RUMBLE);
 	return input_ff_create_memless(input_dev, NULL, sony_play_effect);
@@ -3016,9 +2970,9 @@ static int sony_resume(struct hid_device *hdev)
 
 static const struct hid_device_id sony_devices[] = {
 	{ HID_USB_DEVICE(USB_VENDOR_ID_ACTIVISION, USB_DEVICE_ID_ACTIVISION_GUITAR),
-		.driver_data = GH_GUITAR },
-	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY2, USB_DEVICE_ID_SONY_GUITAR),
-		.driver_data = GH_GUITAR },
+		.driver_data = GH_GUITAR_CONTROLLER },
+	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY2, USB_DEVICE_ID_SONY_GUITAR_CONTROLLER),
+		.driver_data = GH_GUITAR_CONTROLLER },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
 		.driver_data = SIXAXIS_CONTROLLER_USB },
 	{ HID_USB_DEVICE(USB_VENDOR_ID_SONY, USB_DEVICE_ID_SONY_PS3_CONTROLLER),
