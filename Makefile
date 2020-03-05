@@ -1,4 +1,4 @@
-obj-m = hid-sony.o
+obj-m = hid-guitar-hero.o
 
 KVERSION = $(shell uname -r)
 all:

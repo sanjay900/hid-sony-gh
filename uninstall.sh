@@ -1,3 +1,3 @@
 #!/bin/sh
-sudo modprobe -r hid-sony
-sudo dkms remove hid-sony/0.1 --all || true
+sudo modprobe -r hid-guitar-hero
+sudo dkms remove hid-guitar-hero/0.1 --all || true
